@@ -83,6 +83,7 @@ spec:
                 stage("Reboot") {
                     sh """
                     make reboot
+                    sleep 60
                     """
                 }
                 stage("Postcheck") {

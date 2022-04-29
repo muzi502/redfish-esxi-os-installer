@@ -1,0 +1,164 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job@1145.v7f2433caa07f">
+  <actions>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobAction plugin="pipeline-model-definition@1.7.1"/>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction plugin="pipeline-model-definition@1.7.1">
+      <jobProperties/>
+      <triggers/>
+      <parameters/>
+      <options/>
+    </org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction>
+  </actions>
+  <description></description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <org.jenkinsci.plugins.workflow.job.properties.DisableResumeJobProperty/>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.BooleanParameterDefinition>
+          <name>build_iso</name>
+          <description>is rebuild ESXi ISO</description>
+          <defaultValue>true</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>esxi_iso</name>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>VMware-VMvisor-Installer-7.0U3d-19482537.x86_64.iso</string>
+              <string>VMware-VMvisor-Installer-6.7.0.update03-14320388.x86_64.iso</string>
+              <string>VMware-VMvisor-Installer-7.0U2a-17867351.x86_64.iso</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.TextParameterDefinition>
+          <name>config_yaml</name>
+          <description>config.yaml context</description>
+          <trim>false</trim>
+        </hudson.model.TextParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>http_server</name>
+          <description>HTTP server IP address </description>
+          <defaultValue>192.168.29.171</defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>http_dir</name>
+          <description>HTTP server file dir</description>
+          <defaultValue>/usr/share/nginx/html</defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2659.v52d3de6044d0">
+    <script>// params of jenkins job
+def ESXI_ISO = params.esxi_iso
+def CONFIG_YAML = params.config_yaml
+def HTTP_SERVER = params.http_server
+
+// default params for the job
+def HTTP_DIR  = params.http_dir ?: &quot;/usr/share/nginx/html&quot;
+def SRC_ISO_DIR = params.src_iso_dir ?: &quot;${HTTP_DIR}/iso&quot;
+def DEST_ISO_DIR = params.dest_iso_dir ?: &quot;${HTTP_DIR}/iso/redfish&quot;
+
+def WORKSPACE = env.WORKSPACE
+def JOB_NAME = &quot;${env.JOB_BASE_NAME}&quot;
+def BUILD_NUMBER = &quot;${env.BUILD_NUMBER}&quot;
+def POD_NAME = &quot;jenkins-${JOB_NAME}-${BUILD_NUMBER}&quot;
+def POD_IMAGE = params.pod_image ?: &quot;ghcr.io/muzi502/redfish-esxi-os-installer:v0.1.0-alpha.1&quot;
+// Kubernetes pod template to run.
+podTemplate(
+    cloud: &quot;kubernetes&quot;,
+    namespace: &quot;default&quot;,
+    name: POD_NAME,
+    label: POD_NAME,
+    yaml: &quot;&quot;&quot;
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: runner
+    image: ${POD_IMAGE}
+    imagePullPolicy: Always
+    tty: true
+    volumeMounts:
+    - name: http-dir
+      mountPath: ${HTTP_DIR}
+    securityContext:
+      privileged: true
+    env:
+    - name: ESXI_ISO
+      value: ${ESXI_ISO}
+    - name: SRC_ISO_DIR
+      value: ${SRC_ISO_DIR}
+    - name: HTTP_DIR
+      value: ${DEST_ISO_DIR}
+    - name: HTTP_URL
+      value: http://${HTTP_SERVER}/iso/redfish
+  - name: jnlp
+    args: [&quot;\$(JENKINS_SECRET)&quot;, &quot;\$(JENKINS_NAME)&quot;]
+    image: &quot;jenkins/inbound-agent:4.11.2-4-alpine&quot;
+    imagePullPolicy: IfNotPresent
+  volumes:
+  - name: http-dir
+    nfs:
+      server: ${HTTP_SERVER}
+      path: ${HTTP_DIR}
+&quot;&quot;&quot;,
+) {
+    node(POD_NAME) {
+        try {
+            container(&quot;runner&quot;) {
+                writeFile file: &apos;config.yaml&apos;, text: &quot;${CONFIG_YAML}&quot;
+                stage(&quot;Inventory&quot;) {
+                    sh &quot;&quot;&quot;
+                    cp -rf /ansible/* .
+                    make inventory
+                    &quot;&quot;&quot;
+                }
+                stage(&quot;Precheck&quot;) {
+                    sh &quot;&quot;&quot;
+                    make pre-check
+                    &quot;&quot;&quot;
+                }
+                if (params.build_iso) {
+                    stage(&quot;Build-iso&quot;) {
+                        sh &quot;&quot;&quot;
+                        make build-iso
+                        &quot;&quot;&quot;
+                    }
+                }
+                stage(&quot;Mount-iso&quot;) {
+                    sh &quot;&quot;&quot;
+                    make mount-iso
+                    &quot;&quot;&quot;
+                }
+                stage(&quot;Reboot&quot;) {
+                    sh &quot;&quot;&quot;
+                    make reboot
+                    sleep 60
+                    &quot;&quot;&quot;
+                }
+                stage(&quot;Postcheck&quot;) {
+                    sh &quot;&quot;&quot;
+                    make post-check
+                    &quot;&quot;&quot;
+                }
+            }
+            stage(&quot;Success&quot;){
+                MESSAGE = &quot;【Succeed】Jenkins Job ${JOB_NAME}-${BUILD_NUMBER} Link: ${BUILD_URL}&quot;
+                // slackSend(channel: &apos;${SLACK_CHANNE}&apos;, color: &apos;good&apos;, message: &quot;${MESSAGE}&quot;)
+            }
+        } catch (Exception e) {
+            MESSAGE = &quot;【Failed】Jenkins Job ${JOB_NAME}-${BUILD_NUMBER} Link: ${BUILD_URL}&quot;
+            // slackSend(channel: &apos;${SLACK_CHANNE}&apos;, color: &apos;warning&apos;, message: &quot;${MESSAGE}&quot;)
+            throw e
+        }
+    }
+}
+</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>
