@@ -1,0 +1,27 @@
+hosts:
+- ipmi:
+    vendor: lenovo                  # 服务器厂商名 [dell, lenovo, hpe]
+    address: 10.172.70.186          # IPMI IP 地址
+    username: username              # IPMI 用户名
+    password: password              # IPMI 密码
+  esxi:
+    esxi_disk: ThinkSystem M.2      # ESXi OS 所安装硬盘的型号
+    password: password              # ESXi 的 root 用户密码
+    address: 10.172.69.86           # ESXi 管理网络 IP 地址
+    gateway: 10.172.64.1            # ESXi 管理网络网关
+    netmask: 255.255.240.0          # ESXi 管理网络子网掩码
+    hostname: esxi-69-86            # ESXi 主机名（可选）
+    mgtnic: vmnic4                  # ESXi 管理网络网卡名称/MAC 地址
+
+- ipmi:
+    vendor: dell
+    address: 10.172.18.191
+    username: username
+    password: password
+  esxi:
+    esxi_disk: DELLBOSS VD
+    password: password
+    address: 10.172.18.95
+    gateway: 10.172.16.1
+    netmask: 255.255.240.0
+    mgtnic: B4:96:91:A7:3F:D6
