@@ -40,6 +40,8 @@ spec:
       value: ${SRC_ISO_DIR}
     - name: HTTP_DIR
       value: ${DEST_ISO_DIR}
+    - name: HTTP_URL
+      value: http://${HTTP_SERVER}/iso/redfish
   - name: jnlp
     args: ["\$(JENKINS_SECRET)", "\$(JENKINS_NAME)"]
     image: "jenkins/inbound-agent:4.11.2-4-alpine"
